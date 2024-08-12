@@ -50,7 +50,7 @@ class WFTCOverlay(tk.Toplevel):
         self.attributes("-transparentcolor", self['bg'])
         self.geometry(f"{self.max_width}x{300}+0+0")
 
-        self.label = tk.Label(self, text="Loading..", font=("Helvetica", 10, "normal"), fg="white",
+        self.label = tk.Label(self, text="Loading..", font=("Terminal", 10), fg="white",
                               wraplength=self.max_width, justify="left")
         self.label.place(x=3, y=3)
 
@@ -61,9 +61,9 @@ class WFTCOverlay(tk.Toplevel):
 
     # -- Updating label text based on log file
     def update_label(self, label_text):
-        base_label_text = "~~ Tile Checker v1\n"
+        base_label_text = "~~ wftc v1\n"
 
-        self.label.config(text=f"{base_label_text}{label_text}")
+        self.label.config(text=f"{base_label_text}\n{label_text}")
 
 
     # -- Scanning log file
@@ -114,15 +114,28 @@ class WFTCOverlay(tk.Toplevel):
 
             extracted_tiles.append(formatted_text[-2])
 
-        if any(tile in self.possible_roots for tile in extracted_tiles):
-            self.update_label("Good tile spawn found.")
+        # if any(tile in self.possible_roots for tile in extracted_tiles):
+        tiles_found = []
+
+        for tile in self.possible_roots:
+            try:
+                if extracted_tiles.index(tile):
+                    tiles_found.append(tile)
+            except ValueError:
+                continue
+
+        if tiles_found:
+            all_tiles = '\n'.join(tiles_found)
+            self.update_label(f"Found / {len(tiles_found)} / good tiles:\n{all_tiles}")
         else:
-            self.update_label("Bad tile spawns.")
+            self.update_label("No good tile spawns found.")
+
 
     # -- Cleanup function for exiting program
     def on_close(self):
         self.after_cancel(self.read_logs)
         os.kill(os.getpid(), signal.SIGINT)
+
 
 def main():
     root = tk.Tk()
