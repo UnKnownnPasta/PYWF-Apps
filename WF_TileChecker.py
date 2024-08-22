@@ -1,0 +1,255 @@
+"""
+Warframe Tile Checker - Updated 22-08-24 //
+
+Bug/Issue/Feature report @ https://github.com/UnKnownnPasta/WF-Tile-Checker
+"""
+
+
+from io import BytesIO
+import logging
+import tkinter as tk
+import os
+import sys
+import signal
+import time
+import urllib
+import urllib.error
+import urllib.request
+
+#----------------- details
+
+VERSION = "0.1"
+logging.basicConfig(level=logging.INFO)
+KEYWORDS = {
+    "MSN_START": "Lobby::Host_StartMatch",
+    "MSN_END1": "TopMenu.lua: Abort",
+    "MSN_END2": "EndOfMatch.lua",
+    "IN_ORBITER": "Game successfully connected to: /Lotus/Levels/Proc/PlayerShip/",
+    "TILE_LOAD": "Game [Info]: Added streaming layer",
+    "MSN_SELECTED": "Pending mission:",
+    "MSN_UNSELECTED": "ResetSquadMission",
+}
+
+#----------------- overlay class
+
+class Overlay(tk.Toplevel):
+    def __init__(self, root):
+        super().__init__(root)
+        
+        # - Pre req.
+        self.good_tiles = get_tiledata()
+        self.max_width = int(self.winfo_screenwidth() // 2.4)
+
+        # check for env LOCALAPPDATA then gets EE.log
+        self.LOGFILEPATH = define_logpath()
+
+        # - Overlay details
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.attributes("-alpha", 0.9)
+        self.attributes("-transparentcolor", self['bg'])
+        self.geometry(f"{self.max_width}x{600}+0+0")
+
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        signal.signal(signal.SIGINT, self.on_sigint)
+
+        # - Label details
+        self.ol_title = f"=== WF Tile Checker // ver {VERSION}"
+        self.ol_error = "" # filled with errors if needed
+        self.ol_array = []
+
+        constructed_text = f"{self.ol_title}\n{self.ol_error}\n"
+        self.ol = tk.Label(self, text=constructed_text, font=("Terminal", 11), fg="white",
+                            wraplength=self.max_width, justify="left")
+        self.ol.place(x=3, y=3)
+
+        # - Start tracking
+        self.follow_logs()
+
+
+    def ol_update_text(self, text):
+        constructed_text = f"{self.ol_title}\n{self.ol_error}\n{text}"
+        self.ol.config(text=constructed_text)
+
+
+    def follow_logs(self):
+        TacMap_Lines = []
+        at_msn_start = False
+
+        verdict_text = ""
+        
+        try:
+            self.ol_error = ""
+            log_file = open(self.LOGFILEPATH)
+            lines = log_file.readlines()
+
+            if not lines:
+                self.ol_update_text("Log file is empty.")
+                self.after(1000, self.follow_logs)
+                return None
+            elif "Sys [Info]: Main Shutdown Complete." in lines[-1]:
+                self.ol_update_text("Game has been closed.")
+                self.after(1000, self.follow_logs)
+                return None
+
+            # read logs
+            for line in lines:
+                if not test_log_line(line): continue
+
+                if KEYWORDS["MSN_SELECTED"] in line and not at_msn_start:
+                    verdict_text = "Mission queued."
+                    continue
+
+                if KEYWORDS["MSN_START"] in line and not at_msn_start:
+                    at_msn_start = True
+                    continue
+                
+                if (KEYWORDS["MSN_UNSELECTED"] in line or KEYWORDS["IN_ORBITER"] in line) and not at_msn_start:
+                    verdict_text = "Currently in orbiter"
+                    continue
+
+                if (KEYWORDS["MSN_END1"] in line or KEYWORDS["MSN_END2"] in line) and at_msn_start:
+                    at_msn_start = False
+                    verdict_text = "Mission ended."
+                    TacMap_Lines.clear()
+                    continue
+
+                if at_msn_start:
+                    verdict_text = "Mission started."
+                    if KEYWORDS["TILE_LOAD"] in line:
+                        TacMap_Lines.append(line)
+                    continue
+
+            if TacMap_Lines:
+                self.check_tiles(TacMap_Lines)
+            else:
+                self.ol_update_text(verdict_text)
+            log_file.close()
+            self.after(100, self.follow_logs)
+
+        except Exception as e:
+            logging.error(f"Fatal Error while following log file:\n{e}")
+            self.ol_error = f"\nErrored: {e}\n"
+
+
+    def check_tiles(self, TacMaps):
+        accepted_tiles = []
+        found_tiles = []
+
+        for tile in TacMaps:
+            text = tile.split(" ")[6]
+            thing = text.split("/")[4]
+            found_tiles.append(thing)
+        
+        for tile in found_tiles:
+            if tile in self.good_tiles:
+                accepted_tiles.append(tile)
+
+        self.ol_update_text("\n".join(accepted_tiles))
+
+
+    def on_close(self):
+        logging.info("Closing App")
+        sys.exit(0)
+
+
+    def on_sigint(self, signum, frame):
+        logging.warning("SIGINT received, closing App")
+        self.on_close()
+
+
+    def toggle_visibility(self):
+        if self.state() == 'withdrawn':
+            self.deiconify()
+            return 'Visible'
+        else:
+            self.withdraw()
+            return 'Hidden'
+
+#----------------- main function
+
+def main():
+    root = tk.Tk()
+    
+    # -- Root window properties
+    root.geometry("300x30")
+    root.title("WFTC Overlay")
+    root.overrideredirect(False)
+    root.resizable(False, False)
+
+    # -- Creating overlay
+    overlay = Overlay(root)
+
+    # -- Toggle Button to hide/show overlay
+    def toggle_overlay():
+        status = overlay.toggle_visibility()
+        status_label.config(text=f"[ {status} ]")
+
+    toggle_button = tk.Button(root, text="  Toggle Overlay  ", command=toggle_overlay, bd=0,
+                              background="#24a0ed", activebackground="#237fb7")
+    toggle_button.place(x=5, y=5)
+
+    status_label = tk.Label(root, text="[ Visible ]", font=("Helvetica", 10, "normal"))
+    status_label.place(x=99, y=5)
+
+    # -- Start
+    logging.info("App ready")
+    overlay.mainloop()
+
+#----------------- other
+
+def test_log_line(line):
+    if not line:
+        return False
+    elif not line[0].isdigit():
+        return False
+    else:
+        return True
+
+def define_logpath():
+    localenv = os.getenv('LOCALAPPDATA')
+
+    if not localenv:
+        tk.messagebox.showerror("Error", "App could not find EE.log, are you sure warframe is installed correctly?")
+        sys.exit()
+    else:
+        return localenv + r'\Warframe\EE.log'
+
+def fetch_url(url="", max_retries=5, delay=2):
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(url) as response:
+                text_data = response.read().decode('utf-8')
+
+                return text_data
+        except urllib.error.HTTPError as e:
+            logging.warning(f"Failed to retrieve URL Data: {e}\n{'' if attempt == 4 else f'Retrying in {delay}s...'}")
+            time.sleep(delay)
+        except urllib.error.URLError as e:
+            logging.warning(f"URL Error: {e}\n{'' if attempt == 4 else f'Retrying in {delay}s...'}")
+            time.sleep(delay)
+    
+    return []
+
+def get_tiledata():
+    # pastebin of all good tilesets
+    tile_data = fetch_url("https://pastebin.com/raw/u2jprqZ4")
+
+    filtered_tile_data = []
+
+    if not tile_data:
+        logging.warning("Failed to fetch tile data.")
+        return []
+
+    for line in tile_data.split("\n"):
+        if line != "\r" and not line.startswith("#"):
+            filtered_tile_data.append(line.replace("\r", ""))
+
+    logging.info(f"Fetched [{len(filtered_tile_data)}] tilesets")
+    return filtered_tile_data
+
+#----------------- start
+
+if __name__ == "__main__":
+    logging.info("Starting")
+    main()
