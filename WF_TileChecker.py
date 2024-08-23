@@ -5,7 +5,6 @@ Bug/Issue/Feature report @ https://github.com/UnKnownnPasta/WF-Tile-Checker
 """
 
 
-from io import BytesIO
 import logging
 import tkinter as tk
 import os
@@ -19,7 +18,7 @@ import urllib.request
 
 #----------------- details
 
-VERSION = "0.2"
+VERSION = "0.3"
 logging.basicConfig(level=logging.INFO)
 KEYWORDS = {
     "MSN_START": "Script [Info]: ThemedSquadOverlay.lua: Lobby::Host_StartMatch",
@@ -173,11 +172,11 @@ class Overlay(tk.Toplevel):
         # display image + label
         for i, tile in enumerate(accepted_tiles):
             # Create an image object
-            imgurl = fetch_url(f"https://rawcdn.githack.com/UnKnownnPasta/WF-Tile-Checker/3cdfec6fbaf2acbc491de9bfc07263ddb52b7199/ppm/{tile[1]}.ppm")
-            image = tk.PhotoImage(file=f"./{imgurl}.ppm")  # Load the image from a file
+            imgurl = f"./ppm/{tile[1]}.ppm"
+            image = tk.PhotoImage(file=f"{imgurl}")
             img_label = tk.Label(self.frame, image=image)
-            img_label.image = image  # Keep a reference to prevent garbage collection
-            img_label.grid(row=i, column=0, padx=10, pady=5)  # Place image in the first column
+            img_label.image = image
+            img_label.grid(row=i, column=0, padx=10, pady=5)
 
             # Create the label
             text_label = tk.Label(self.frame, text=f"Location: {tile[0]}\nInternal: {tile[1]}", justify='left', font=("Terminal", 11), fg="white")
@@ -185,6 +184,7 @@ class Overlay(tk.Toplevel):
 
             self.ol_array.extend([img_label, text_label])
 
+        self.ol_update_text(f"Found {len(accepted_tiles)} good tile(s).")
 
     def on_close(self):
         logging.info("Closing App")
@@ -266,13 +266,13 @@ def fetch_url(url="", max_retries=5, delay=2):
 
                 return text_data
         except urllib.error.HTTPError as e:
-            logging.warning(f"Failed to retrieve URL Data: {e}\n{'' if attempt == 4 else f'Retrying in {delay}s...'}")
+            logging.warning(f"Failed to retrieve URL Data: {url}\n{e}\n{'' if attempt == 4 else f'Retrying in {delay}s...'}")
             time.sleep(delay)
         except urllib.error.URLError as e:
             logging.warning(f"URL Error: {e}\n{'' if attempt == 4 else f'Retrying in {delay}s...'}")
             time.sleep(delay)
-    
-    return []
+
+    return ""
 
 def get_tiledata():
     # pastebin of all good tilesets
