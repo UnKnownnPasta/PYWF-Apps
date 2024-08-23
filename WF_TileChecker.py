@@ -173,7 +173,7 @@ class Overlay(tk.Toplevel):
         # display image + label
         for i, tile in enumerate(accepted_tiles):
             # Create an image object
-            imgurl = tile[1] if (tile[1] in ['GrnConnectorEightteen', 'GrnSpawnThree', 'GrnConnectorFifteen']) else 'img1'
+            imgurl = fetch_url(f"https://rawcdn.githack.com/UnKnownnPasta/WF-Tile-Checker/3cdfec6fbaf2acbc491de9bfc07263ddb52b7199/ppm/{tile[1]}.ppm")
             image = tk.PhotoImage(file=f"./{imgurl}.ppm")  # Load the image from a file
             img_label = tk.Label(self.frame, image=image)
             img_label.image = image  # Keep a reference to prevent garbage collection
