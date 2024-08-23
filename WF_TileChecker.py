@@ -12,22 +12,24 @@ import os
 import sys
 import signal
 import time
+import ctypes
 import urllib
 import urllib.error
 import urllib.request
 
 #----------------- details
 
-VERSION = "0.1"
+VERSION = "0.2"
 logging.basicConfig(level=logging.INFO)
 KEYWORDS = {
-    "MSN_START": "Lobby::Host_StartMatch",
-    "MSN_END1": "TopMenu.lua: Abort",
-    "MSN_END2": "EndOfMatch.lua",
+    "MSN_START": "Script [Info]: ThemedSquadOverlay.lua: Lobby::Host_StartMatch",
+    "MSN_END1": "Script [Info]: TopMenu.lua: Abort",
+    "MSN_END2": "Script [Info]: EndOfMatch.lua",
     "IN_ORBITER": "Game successfully connected to: /Lotus/Levels/Proc/PlayerShip/",
     "TILE_LOAD": "Game [Info]: Added streaming layer",
-    "MSN_SELECTED": "Pending mission:",
-    "MSN_UNSELECTED": "ResetSquadMission",
+    "MSN_SELECTED": "Script [Info]: ThemedSquadOverlay.lua: Pending mission:",
+    "MSN_UNSELECTED": "Script [Info]: ThemedSquadOverlay.lua: ResetSquadMission",
+    "GAME_CLOSED": "Sys [Info]: Main Shutdown Complete."
 }
 
 #----------------- overlay class
@@ -49,6 +51,7 @@ class Overlay(tk.Toplevel):
         self.attributes("-alpha", 0.9)
         self.attributes("-transparentcolor", self['bg'])
         self.geometry(f"{self.max_width}x{600}+0+0")
+        make_clickthrough(self)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         signal.signal(signal.SIGINT, self.on_sigint)
@@ -63,8 +66,13 @@ class Overlay(tk.Toplevel):
                             wraplength=self.max_width, justify="left")
         self.ol.place(x=3, y=3)
 
+        # - Mission details frame
+        self.frame = tk.Frame(self)
+        self.frame.place(y=80, x=3)
+
         # - Start tracking
         self.follow_logs()
+        logging.info("Started log-tracking")
 
 
     def ol_update_text(self, text):
@@ -87,7 +95,7 @@ class Overlay(tk.Toplevel):
                 self.ol_update_text("Log file is empty.")
                 self.after(1000, self.follow_logs)
                 return None
-            elif "Sys [Info]: Main Shutdown Complete." in lines[-1]:
+            elif KEYWORDS["GAME_CLOSED"] in lines[-1]:
                 self.ol_update_text("Game has been closed.")
                 self.after(1000, self.follow_logs)
                 return None
@@ -111,6 +119,7 @@ class Overlay(tk.Toplevel):
                 if (KEYWORDS["MSN_END1"] in line or KEYWORDS["MSN_END2"] in line) and at_msn_start:
                     at_msn_start = False
                     verdict_text = "Mission ended."
+                    self.clear_actl()
                     TacMap_Lines.clear()
                     continue
 
@@ -132,20 +141,49 @@ class Overlay(tk.Toplevel):
             self.ol_error = f"\nErrored: {e}\n"
 
 
+    def clear_actl(self):
+        if self.ol_array:
+            for label in self.ol_array:
+                label.destroy()
+            self.ol_array.clear()        
+
+
     def check_tiles(self, TacMaps):
+        self.clear_actl()
+
         accepted_tiles = []
         found_tiles = []
 
-        for tile in TacMaps:
-            text = tile.split(" ")[6]
-            thing = text.split("/")[4]
-            found_tiles.append(thing)
+        for tile_1 in TacMaps:
+            text = tile_1.split(" ")
+            if len(text) < 6: continue
+            thing = text[6].split("/")
+            if len(thing) < 4: continue
+            found_tiles.append(thing[4])
         
-        for tile in found_tiles:
-            if tile in self.good_tiles:
-                accepted_tiles.append(tile)
+        for j, tile_0 in enumerate(found_tiles):
+            if tile_0 in self.good_tiles:
+                status = ""
+                if j < 3: status = "Close"
+                elif j >= 3 and j < 8: status = "Far"
+                elif j >= 8: status = "Very far"
 
-        self.ol_update_text("\n".join(accepted_tiles))
+                accepted_tiles.append([status, tile_0])
+
+        # display image + label
+        for i, tile in enumerate(accepted_tiles):
+            # Create an image object
+            imgurl = tile[1] if (tile[1] in ['GrnConnectorEightteen', 'GrnSpawnThree', 'GrnConnectorFifteen']) else 'img1'
+            image = tk.PhotoImage(file=f"./{imgurl}.ppm")  # Load the image from a file
+            img_label = tk.Label(self.frame, image=image)
+            img_label.image = image  # Keep a reference to prevent garbage collection
+            img_label.grid(row=i, column=0, padx=10, pady=5)  # Place image in the first column
+
+            # Create the label
+            text_label = tk.Label(self.frame, text=f"Location: {tile[0]}\nInternal: {tile[1]}", justify='left', font=("Terminal", 11), fg="white")
+            text_label.grid(row=i, column=1, padx=10, pady=5, sticky="w")
+
+            self.ol_array.extend([img_label, text_label])
 
 
     def on_close(self):
@@ -197,6 +235,11 @@ def main():
     overlay.mainloop()
 
 #----------------- other
+
+def make_clickthrough(item):
+    hwnd = ctypes.windll.user32.GetParent(item.winfo_id())
+    style = ctypes.windll.user32.GetWindowLongPtrW(hwnd, -20)
+    ctypes.windll.user32.SetWindowLongPtrW(hwnd, -20, style | 0x80000 | 0x20)
 
 def test_log_line(line):
     if not line:
