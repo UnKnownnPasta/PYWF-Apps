@@ -87,7 +87,7 @@ class Overlay(tk.Toplevel):
         
         try:
             self.ol_error = ""
-            log_file = open(self.LOGFILEPATH)
+            log_file = open(self.LOGFILEPATH, 'r', encoding='utf-8')
             lines = log_file.readlines()
 
             if not lines:
