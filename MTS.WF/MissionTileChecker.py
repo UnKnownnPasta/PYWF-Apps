@@ -19,7 +19,7 @@ import threading
 
 #----------------- details
 
-VERSION = "0.3"
+VERSION = "0.3.1"
 logging.basicConfig(level=logging.INFO)
 KEYWORDS = {
     "MSN_START": "Script [Info]: ThemedSquadOverlay.lua: Lobby::Host_StartMatch",
@@ -93,17 +93,15 @@ class Overlay(tk.Toplevel):
     def follow_logs(self):
         TacMap_Lines = []
         at_msn_start = False
+        TacMap_Len = 0
 
         verdict_text = ""
 
         logging.info("Awaiting log file...")
         with open(self.LOGFILEPATH, 'r', encoding='utf-8') as file:
-            if KEYWORDS["GAME_CLOSED"] in file.read():
-                self.ol_update_text("Game closed. Reopen the app when it's back up.")
-                self.stop_event.set()
-                return;
-
             for line in self.follow(file):
+                if not test_log_line(line): continue;
+
                 if self.stop_event.is_set():
                     break;
 
@@ -112,6 +110,7 @@ class Overlay(tk.Toplevel):
                     verdict_text = "Mission queued."
                     continue
                 elif KEYWORDS["MSN_START"] in line and not at_msn_start:
+                    verdict_text = "Mission started."
                     at_msn_start = True
                     continue
                 elif (KEYWORDS["MSN_UNSELECTED"] in line or KEYWORDS["IN_ORBITER"] in line) and not at_msn_start:
@@ -122,17 +121,17 @@ class Overlay(tk.Toplevel):
                     verdict_text = "Mission ended."
                     self.clear_actl()
                     TacMap_Lines.clear()
+                    TacMap_Len = 0
                     continue
                 elif at_msn_start:
-                    verdict_text = "Mission started."
                     if KEYWORDS["TILE_LOAD"] in line:
                         TacMap_Lines.append(line)
-                    continue
 
                 # - check if tile load
-                if TacMap_Lines:
+                if TacMap_Lines and TacMap_Len < len(TacMap_Lines):
                     self.check_tiles(TacMap_Lines)
-                else:
+                    TacMap_Len = len(TacMap_Lines)
+                elif not len(TacMap_Lines):
                     self.ol_update_text(verdict_text)
 
 
