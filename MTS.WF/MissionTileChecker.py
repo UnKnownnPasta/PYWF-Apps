@@ -15,6 +15,7 @@ import ctypes
 import urllib
 import urllib.error
 import urllib.request
+import threading
 
 #----------------- details
 
@@ -69,13 +70,23 @@ class Overlay(tk.Toplevel):
         self.frame = tk.Frame(self)
         self.frame.place(y=80, x=3)
 
-        # - Start tracking
-        self.follow_logs()
-        logging.info("Started log-tracking")
+        # - start tail
+        self.start_tail()
+
+
+    def start_tail(self):
+        self.log_thread  = threading.Thread(target=self.follow_logs)
+        self.stop_event = threading.Event()
+        self.log_thread.daemon = True
+        self.log_thread.start()
 
 
     def ol_update_text(self, text):
-        constructed_text = f"{self.ol_title}\n{self.ol_error}\n{text}"
+        constructed_text = ""
+        if self.ol_error:
+            constructed_text = f"{self.ol_title}\n{self.ol_error}\n{text}"
+        else:
+            constructed_text = f"{self.ol_title}\n{text}"
         self.ol.config(text=constructed_text)
 
 
@@ -84,67 +95,70 @@ class Overlay(tk.Toplevel):
         at_msn_start = False
 
         verdict_text = ""
-        
-        try:
-            self.ol_error = ""
-            log_file = open(self.LOGFILEPATH, 'r', encoding='utf-8')
-            lines = log_file.readlines()
 
-            if not lines:
-                self.ol_update_text("Log file is empty.")
-                self.after(1000, self.follow_logs)
-                return None
-            elif KEYWORDS["GAME_CLOSED"] in lines[-1]:
-                self.ol_update_text("Game has been closed.")
-                self.after(1000, self.follow_logs)
-                return None
+        logging.info("Awaiting log file...")
+        with open(self.LOGFILEPATH, 'r', encoding='utf-8') as file:
+            if KEYWORDS["GAME_CLOSED"] in file.read():
+                self.ol_update_text("Game closed. Reopen the app when it's back up.")
+                self.stop_event.set()
+                return;
 
-            # read logs
-            for line in lines:
-                if not test_log_line(line): continue
+            for line in self.follow(file):
+                if self.stop_event.is_set():
+                    break;
 
+                # - check for keyword conditions
                 if KEYWORDS["MSN_SELECTED"] in line and not at_msn_start:
                     verdict_text = "Mission queued."
                     continue
-
-                if KEYWORDS["MSN_START"] in line and not at_msn_start:
+                elif KEYWORDS["MSN_START"] in line and not at_msn_start:
                     at_msn_start = True
                     continue
-                
-                if (KEYWORDS["MSN_UNSELECTED"] in line or KEYWORDS["IN_ORBITER"] in line) and not at_msn_start:
+                elif (KEYWORDS["MSN_UNSELECTED"] in line or KEYWORDS["IN_ORBITER"] in line) and not at_msn_start:
                     verdict_text = "Currently in orbiter"
                     continue
-
-                if (KEYWORDS["MSN_END1"] in line or KEYWORDS["MSN_END2"] in line) and at_msn_start:
+                elif (KEYWORDS["MSN_END1"] in line or KEYWORDS["MSN_END2"] in line) and at_msn_start:
                     at_msn_start = False
                     verdict_text = "Mission ended."
                     self.clear_actl()
                     TacMap_Lines.clear()
                     continue
-
-                if at_msn_start:
+                elif at_msn_start:
                     verdict_text = "Mission started."
                     if KEYWORDS["TILE_LOAD"] in line:
                         TacMap_Lines.append(line)
                     continue
 
-            if TacMap_Lines:
-                self.check_tiles(TacMap_Lines)
-            else:
-                self.ol_update_text(verdict_text)
-            log_file.close()
-            self.after(100, self.follow_logs)
-
-        except Exception as e:
-            logging.error(f"Fatal Error while following log file:\n{e}")
-            self.ol_error = f"\nErrored: {e}\n"
+                # - check if tile load
+                if TacMap_Lines:
+                    self.check_tiles(TacMap_Lines)
+                else:
+                    self.ol_update_text(verdict_text)
 
 
     def clear_actl(self):
         if self.ol_array:
             for label in self.ol_array:
                 label.destroy()
-            self.ol_array.clear()        
+            self.ol_array.clear()
+
+
+    def follow(self, file, sleep_sec=0.1):
+        """ Yield each line from a file as they are written.
+        `sleep_sec` is the time to sleep after empty reads. """
+        line = ''
+        while True:
+            tmp = file.readline()
+            if tmp is not None and tmp != "":
+                line += tmp
+                if line.endswith("\n"):
+                    yield line
+                    line = ''
+            elif sleep_sec:
+                if self.stop_event.is_set(): 
+                    break;
+                else: 
+                    time.sleep(sleep_sec)
 
 
     def check_tiles(self, TacMaps):
@@ -186,8 +200,11 @@ class Overlay(tk.Toplevel):
 
         self.ol_update_text(f"Found {len(accepted_tiles)} good tile(s).")
 
+
     def on_close(self):
         logging.info("Closing App")
+        self.stop_event.set()
+        self.log_thread.join()
         sys.exit(0)
 
 
@@ -232,7 +249,7 @@ def main():
 
     # -- Start
     logging.info("App ready")
-    overlay.mainloop()
+    root.mainloop()
 
 #----------------- other
 
